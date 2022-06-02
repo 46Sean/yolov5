@@ -70,14 +70,28 @@ class Detect(nn.Module):
                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)  # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
                     xy = (xy * 2 + self.grid[i]) * self.stride[i]  # xy
                     wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
-                    y = torch.cat((xy, wh, conf), 4)
-                z.append(y.view(bs, -1, self.no))
-
-        return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
+                    xmin = xy[..., 0:1] - wh[..., 0:1] / 2
+                    ymin = xy[..., 1:2] - wh[..., 1:2] / 2
+                    xmax = xy[..., 0:1] + wh[..., 0:1] / 2
+                    ymax = xy[..., 1:2] + wh[..., 1:2] / 2
+                    obj_conf = conf[..., 0:1]
+                    cls_conf = conf[..., 1:]
+                    cls_conf *= obj_conf 
+                    # y = torch.cat((xy, wh, conf), 4)
+                    y = torch.cat((xmin, ymin, xmax, ymax, cls_conf), 4)
+                z.append(y.view(bs, -1, self.no - 1))
+        
+        z = torch.cat(z, 1)
+        bbox = z[..., 0:4].view(bs, -1, 1, 4)
+        cls_conf = z[..., 4:]
+        return bbox, cls_conf
+        # return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
 
     def _make_grid(self, nx=20, ny=20, i=0):
         d = self.anchors[i].device
-        t = self.anchors[i].dtype
+        # t = self.anchors[i].dtype
+        # TODO(tylerz) hard-code data type to int
+        t = torch.int32
         shape = 1, self.na, ny, nx, 2  # grid shape
         y, x = torch.arange(ny, device=d, dtype=t), torch.arange(nx, device=d, dtype=t)
         if check_version(torch.__version__, '1.10.0'):  # torch>=1.10.0 meshgrid workaround for torch>=0.7 compatibility
